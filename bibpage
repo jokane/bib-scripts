@@ -1,0 +1,290 @@
+#!/usr/bin/perl
+
+# Usage: bibpage <input file> <output file> 
+# 
+# This program generates an HTML publication list from a BibTeX file.
+
+print "You probably want bibsite instead.\n";
+exit 0;
+
+
+use strict;
+use warnings;
+use vars qw($fieldCount %order);
+use vars qw($OWNER $MAIN_PREFIX $IMAGE_PREFIX $PDF_PREFIX $PDF_IMG);
+use Text::BibTeX qw(:macrosubs);
+
+$OWNER = "Jason M. O'Kane";
+#$MAIN_PREFIX = "file:///home/lavalle/jokane/public_html";
+$MAIN_PREFIX = "http://www.cse.sc.edu/~jokane";
+$IMAGE_PREFIX = "$MAIN_PREFIX/figures";
+$PDF_PREFIX = "$MAIN_PREFIX/papers";
+$PDF_IMG = "$MAIN_PREFIX/images/pdf.png";
+
+use Text::BibTeX qw(split_list);
+use Text::Wrap;
+use Getopt::Long;
+
+sub formatAuthors {
+	my $authors = shift;
+
+	$authors =~ s/ and /, /g;
+	$authors =~ s/$OWNER/<b>$OWNER<\/b>/g;
+	
+	return $authors;
+}
+
+sub go {
+	# Process the command line options.  After GetOptions sucks out any
+	# flags, there should be exactly two options left: the input and
+	# output file names.
+	if(!GetOptions(
+	)) {
+		exit(1);
+	}
+
+	if(scalar(@ARGV) != 2) {
+		print STDERR "Usage:  bibpage <input file> <output file>\n";
+		exit(1);
+	}
+	
+	# Open the output file.
+	if(!open(OUT, ">$ARGV[1]")) {
+		print STDERR "Could not open output file $ARGV[1]\n";
+		exit(1);
+	}
+
+	# Basic headings.
+	print OUT "<html>\n";
+	print OUT "<head>\n";
+	print OUT "<title>Publications of $OWNER</title>\n";
+	print OUT "<link rel=\"stylesheet\" href=\"$MAIN_PREFIX/jokane-pubs.css\" type=\"text/css\">\n";
+	print OUT "</head>\n";
+	print OUT "<body>\n";
+	print OUT "<h1>Publications of $OWNER</h1>\n";
+	# print OUT "In approximate reverse chronological order.\n";
+
+	# Open the input file.
+	delete_all_macros();
+	my $infile;
+	if(!($infile = new Text::BibTeX::File $ARGV[0])) { 
+		print STDERR "Could not open input file $ARGV[0]\n";
+		exit(1);
+	}
+	$infile->set_structure('Bib');
+
+	# Read in the entire input file, because Text::BibTeX doesn't like to
+	# make two passes over the same file.
+	my @entries;
+	while(my $entry = new Text::BibTeX::Entry $infile) {
+		push @entries, $entry;
+	}
+
+	# Pass 1: Short list.
+	my $lastcat = "";
+	my $n = 0;
+	
+	print OUT "<table>\n";
+	foreach my $entry (@entries) {
+		# Skip any macros.
+		next if($entry->type() eq "string");
+
+		$n++;
+
+		# Category heading, if needed.
+		if($lastcat ne $entry->get("category")) {
+			if($lastcat ne "") {
+				print OUT "<tr><td>&nbsp;</td></tr>\n";
+			}
+			$lastcat = $entry->get("category");
+			print OUT "<tr><td colspan=2><font size=+1><b>$lastcat</b></font></td></tr>\n";
+		}
+
+		# Bibliographic entry.
+		print OUT "<tr>";
+		print OUT "<td align=right valign=top>[$n]</td>";
+		print OUT "<td align=left valign=top>";
+		print OUT formatAuthors($entry->get("author")).". ";
+
+		(my $title = $entry->get("title")) =~ s/[{}]//g;
+		print OUT "<a href=\"#".$entry->key."\">$title</a>. \n";
+
+		if($entry->type eq "article") {
+			my $journal = $entry->get("journal");
+			$journal =~ s/\\emph{(.*)}/<i>$1<\/i>/g;
+			print OUT "<i>$journal</i>, \n" if($entry->exists("journal"));
+			print OUT $entry->get("volume") if($entry->exists("volume"));
+			print OUT "(".$entry->get("number").")" if($entry->exists("number"));
+			print OUT ":".$entry->get("pages").", " if($entry->exists("pages"));
+			print OUT $entry->get("month")." " if($entry->exists("month"));
+			print OUT $entry->get("year").". " if($entry->exists("year"));
+		} elsif($entry->type eq "inproceedings") {
+			print OUT "In <i>".$entry->get("booktitle")."</i>, ".$entry->get("year").".\n"; 
+		} elsif($entry->type eq "phdthesis") {
+			print OUT "Ph.D. thesis. \n";
+			print OUT $entry->get("school").",\n";
+			print OUT $entry->get("month")." ".$entry->get("year")."\n";
+		} elsif($entry->type eq "mastersthesis") {
+			print OUT "Master's thesis. \n";
+			print OUT $entry->get("school").",\n";
+			print OUT $entry->get("month")." ".$entry->get("year")."\n";
+		} elsif($entry->type eq "incollection") {
+			print OUT "In ";
+			print OUT $entry->get("editor").", editors, ";
+			print OUT "<i>".$entry->get("booktitle")."</i>, \n";
+			print OUT $entry->get("series").",\n" if($entry->exists("series"));
+			print OUT "chapter ".$entry->get("chapter").", \n" if($entry->exists("chapter"));
+			print OUT "pages ".$entry->get("pages").". \n" if($entry->exists("pages"));
+			print OUT $entry->get("publisher").", ";
+			print OUT $entry->get("year").".\n" if($entry->exists("year"));
+		} elsif($entry->type eq "misc") {
+			print OUT $entry->get("year").".\n" if($entry->exists("year"));
+		} else {
+			print "Don't know how to format ".$entry->key."\n";
+		}	
+
+		if($entry->exists("note")) {
+			my $note = $entry->get("note");
+			$note =~ s/\\emph{(.*)}/<i>$1<\/i>/g;
+			print OUT "$note.";
+		}
+		print OUT "<p>\n";
+		print OUT "</td>";
+		print OUT "</tr>";
+	}
+	print OUT "</table>\n\n";
+	print OUT "&nbsp;<br>\n";
+	print OUT "<hr>\n";
+	print OUT "&nbsp;<br>\n";
+	print OUT "&nbsp;<br>\n";
+	print OUT "&nbsp;<br>\n";
+
+	# Pass 2: Detailed, with pictures, BibTeX, abstracts, etc.
+	foreach my $entry (@entries) {
+		# Skip any macros.
+		next if($entry->type() eq "string");
+
+		# Paper title.
+		(my $title = $entry->get("title")) =~ s/[{}]//g;
+		print OUT "<a name=".$entry->key."><h2>$title</h2></a>\n";
+
+		# One or more llustrations.
+		if($entry->exists("image")) {
+			foreach my $image (split(",",$entry->get("image"))) {
+				print OUT "<img align=right src=\"$IMAGE_PREFIX/$image\">\n";
+			}
+		}
+
+
+		# Formatted bibliographic reference.
+		print OUT formatAuthors($entry->get("author"))."<p>\n";
+		if($entry->type eq "article") {
+			if($entry->exists("journal")) {
+				my $journal = $entry->get("journal");
+				$journal =~ s/\\emph{(.*)}/<i>$1<\/i>/g;
+				print OUT $journal."<br>\n";
+			}
+			print OUT $entry->get("month")." " if($entry->exists("month"));
+			print OUT $entry->get("year")." " if($entry->exists("year"));
+			print OUT "<br>\n";
+			print OUT "Volume ".$entry->get("volume") if($entry->exists("volume"));
+			print OUT ", Number ".$entry->get("number")."<br>\n" if($entry->exists("number"));
+			print OUT "Pages ".$entry->get("pages")."<br>\n" if($entry->exists("pages"));
+		} elsif($entry->type eq "inproceedings") {
+			print OUT "<i>".$entry->get("booktitle")."</i>, ".$entry->get("year")."<br>\n"; 
+		} elsif($entry->type eq "phdthesis") {
+			print OUT "Ph.D. Thesis<br>\n";
+			print OUT $entry->get("school")."<br>\n";
+			print OUT $entry->get("month")." ".$entry->get("year")."<br>\n";
+		} elsif($entry->type eq "mastersthesis") {
+			print OUT "Master's Thesis<br>\n";
+			print OUT $entry->get("school")."<br>\n";
+			print OUT $entry->get("month")." ".$entry->get("year")."<br>\n";
+		} elsif($entry->type eq "incollection") {
+			print OUT "In <i>".$entry->get("booktitle")."</i><br>\n";
+			print OUT $entry->get("publisher");
+			if($entry->exists("series")) {
+				print OUT ", ".$entry->get("series")."<br>\n";
+			} else {
+				print OUT "<br>\n";
+			}
+			print OUT "Chapter ".$entry->get("chapter")."<br>\n" if($entry->exists("chapter"));
+			print OUT "Pages ".$entry->get("pages")."<br>\n" if($entry->exists("pages"));
+			print OUT $entry->get("year")."<br>\n" if($entry->exists("year"));
+		} elsif($entry->type eq "misc") {
+			my $note = $entry->get("note");
+			print OUT $entry->get("year")."<br>\n" if($entry->exists("year"));
+		} else {
+			print "Don't know how to format ".$entry->key."\n";
+		}	
+		if($entry->exists("note")) {
+			my $note = $entry->get("note");
+			$note =~ s/\\emph{(.*)}/<i>$1<\/i>/g;
+			print OUT "$note<br>";
+		}
+
+		# Special notes about this paper.
+		if($entry->exists("htmlnote")) {
+			print OUT "<h3>Note</h3>\n";
+			my $note = $entry->get("htmlnote");
+
+			# Handle a special syntax for links between papers.
+			$note =~ s/\[([^|]*)\|([^\]]*)\]/<a href="#$2">$1<\/a>/g;
+
+			print OUT "$note<br>\n" if($entry->exists("htmlnote"));
+		}
+
+
+		# Abstract.
+		if($entry->exists("abstract")) {
+			print OUT "<h3>Abstract</h3>\n";
+			print OUT $entry->get("abstract")."\n"
+		}
+
+		# Download link.
+		if($entry->exists("pdf")) {
+			print OUT "<h3>Download</h3>\n";
+			print OUT "<a href=\"$PDF_PREFIX/". $entry->get("pdf")."\">\n";
+			print OUT "<img src=\"$PDF_IMG\" border=0>\n";
+			print OUT "</a>\n"
+		}
+
+		# BibTeX entry.
+		print OUT "<h3>BibTeX</h3>\n";
+		print OUT "<pre>\n";
+		print OUT "@".lc($entry->type())."{".$entry->key().",\n";
+		for my $field ($entry->fieldlist()) {
+
+			# Skip fields that are useful only internally.
+			next if($field =~ /(htmlnote)|(category)|(abstract)|(pdf)|(image)/);;
+			
+			# Some fields need special formatting.
+			my $fieldtext = "{".$entry->get($field)."}";
+
+			# Format and print the field.
+			my $text = sprintf "  %-12s = %s", $field, $fieldtext;
+			$text = wrap("","                 ",$text);
+
+			print OUT $text;
+			my $list = scalar $entry->fieldlist();
+			my $lastField = $$list[@$list-1];
+			print OUT "," if($field ne $lastField);
+			print OUT "\n";
+		}
+		print OUT "}\n\n";
+		print OUT "</pre>\n";
+
+		# End of this entry.
+		print OUT "<hr>\n";
+	}
+
+	# Finish up.
+	print OUT "<div align=right><i><font size=-1>".`date`."</font></i></div>\n";
+	print OUT "</body>\n";
+	print OUT "</html>\n";
+}
+			
+
+go;
+
+

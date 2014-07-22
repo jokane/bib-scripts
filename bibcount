@@ -1,0 +1,40 @@
+#!/usr/bin/perl
+
+# Usage: bibcount <input file>
+# 
+# Counts the number of entries of each type in a BibTeX file.
+#
+
+use strict;
+use warnings;
+
+use Text::BibTeX;
+
+
+sub go {
+	# Open the input file.
+	my $infile = new Text::BibTeX::File $ARGV[0] || die;
+	$infile->set_structure('Bib');
+
+	
+	my %count;
+	my $totalFields = 0;
+	my $totalEntries = 0;
+	while(my $entry = new Text::BibTeX::Entry $infile) {
+		$count{$entry->type} ++;
+		$totalFields += $entry->num_fields();
+		$totalEntries++;
+	}
+
+	foreach my $type (sort keys %count) {
+		printf "%4d %s\n", $count{$type}, $type;
+	}
+		printf "%4d total entries\n", $totalEntries;
+		printf "%4d total fields\n", $totalFields;
+
+
+}
+
+go;
+
+

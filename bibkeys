@@ -1,0 +1,35 @@
+#!/usr/bin/perl
+
+# Usage: bibkeys <input file>
+# 
+# Prints a sorted list of the unique keys for each entry.
+#
+
+use strict;
+use warnings;
+
+use Text::BibTeX;
+
+
+sub go {
+	# Open the input file.
+	my $infile = new Text::BibTeX::File $ARGV[0] || die;
+	$infile->set_structure('Bib');
+
+	
+	my %keys;
+	while(my $entry = new Text::BibTeX::Entry $infile) {
+		next if($entry->type() eq "string");
+		$keys{$entry->key} ++;
+	}
+
+	foreach my $key (sort keys %keys) {
+		print "$key\n";
+	}
+
+
+}
+
+go;
+
+

@@ -1,0 +1,52 @@
+#!/usr/bin/perl
+
+# Usage: bibmerge <input files>
+# 
+# This program reads multiple input bib files and produces a single output bib
+# containing all of the unique entries from the inputs.
+
+use strict;
+use warnings;
+
+use Text::BibTeX qw(split_list);
+use Getopt::Long;
+
+sub go {
+
+	# Process the command line options.  After GetOptions sucks out any flags,
+	# everything else should be an input file.
+	if(!GetOptions(
+	)) {
+		exit(1);
+	}
+
+	my $infile;
+	my %entries;
+
+
+	foreach my $fileName (@ARGV) {
+		Text::BibTeX::delete_all_macros();
+		if(!($infile = new Text::BibTeX::File $fileName)) { 
+			print STDERR "Could not open input file $fileName\n";
+			exit(1);
+		}
+		$infile->set_structure('Bib');
+
+		while(my $entry = new Text::BibTeX::Entry $infile) {
+			my $text = $entry->print_s();
+			$text =~ s///g;
+			$entries{$text}++;
+		}
+	}
+
+	foreach my $key (sort keys %entries) {
+		print "% $entries{$key}\n";
+		print "$key\n";
+	}
+
+
+}
+
+go;
+
+

@@ -1,0 +1,49 @@
+#!/usr/bin/perl
+
+# Usage: biblist <input file> <fields to list>
+# 
+# This program processes a BibTeX file, printing all of the unique values of
+# the selected fields, sorted by decreasing frequency.
+
+use strict;
+use warnings;
+
+use Text::BibTeX qw(split_list);
+use IPC::Open2;
+
+sub go {
+	my $infile = new Text::BibTeX::File $ARGV[0] || die;
+	$infile->set_structure('Bib');
+
+	my @fields;
+	while(my $field = shift @ARGV) {
+		push(@fields,$field);
+	}
+
+	open2(*FiltersIn, *FiltersOut, "sort | uniq -c | sort -n -r ");
+
+	while(my $entry = new Text::BibTeX::Entry $infile) {
+		next unless $entry->parse_ok;
+		foreach my $field (@fields) {
+			if($field ne "author" && $entry->exists($field)) {
+				print FiltersOut $entry->get($field) . "\n";
+			} elsif($field eq "author" && $entry->exists($field)) {
+				foreach my $author (split_list($entry->get($field), "and")) {
+					print FiltersOut $author . "\n";
+				}
+				
+			}
+		}
+	}
+
+	close FiltersOut;
+
+	while(<FiltersIn>) {
+		print;
+	}
+
+}
+
+go;
+
+

@@ -1,0 +1,76 @@
+#!/usr/bin/perl
+
+# Usage: bibaudit <input file> <fields to list>
+# 
+# This program processes a BibTeX file, finding similar but not identical
+# values of the selected fields.  The intention is to find typographical errors
+# and inconsistencies.
+
+use strict;
+use warnings;
+
+use Text::BibTeX qw(split_list);
+use Text::Levenshtein qw(fastdistance);
+use IPC::Open2;
+
+sub go {
+	# Open the input file.
+	my $infile = new Text::BibTeX::File $ARGV[0] || die;
+	$infile->set_structure('Bib');
+
+	# Get the command line arguments.
+	my @fields;
+	while(my $field = shift @ARGV) {
+		push(@fields,$field);
+	}
+
+	# Start a series of filters to sort the output.
+	open2(*FiltersIn, *FiltersOut, "sort -n ");
+
+	# Extract the relevant fields from each record in the file.
+	my %values;
+	while(my $entry = new Text::BibTeX::Entry $infile) {
+		next unless $entry->parse_ok;
+		foreach my $field (@fields) {
+			if($field ne "author" && defined($entry->get($field))) {
+				$values{$entry->get($field)} ++ ;
+			} elsif($field eq "author" && defined($entry->get($field))) {
+				# The author field needs to be handled a little differently because a
+				# bunch of authors will usually be clumped together.
+				foreach my $author (split_list($entry->get($field), "and")) {
+					$values{$author} ++ ;
+				}
+			}
+		}
+	}
+
+	# Compare each pair of values, computing their edit distance.
+	print STDERR "Found ". keys(%values) . " values.\n";
+	print STDERR "Searching for similarities.  This may take some time.\n";
+	my $tot = int(keys(%values) * keys(%values) / 2);
+	my $ct = 0;
+	for my $key1 (sort keys %values) {
+		for my $key2 (sort keys %values) {
+			next unless $key1 gt $key2;
+			my $dist = fastdistance($key1, $key2);
+			if($dist <= 5) {
+				print FiltersOut sprintf("%3d %-15s (%3d) %-15s (%3s)\n", $dist,
+					$key1, $values{$key1}, $key2, $values{$key2});
+			}
+			if(++$ct % 5000 == 0) {
+				print STDERR "$ct of $tot\n";
+			}
+		}
+	}
+	close FiltersOut;
+
+	
+	# Get the results back from the filter chain and send them to standard
+	# output.
+	print while(<FiltersIn>);
+
+}
+
+go;
+
+

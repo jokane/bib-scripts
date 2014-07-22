@@ -1,0 +1,92 @@
+#!/usr/bin/perl
+
+# Usage: bibkeytypo <log file> <bib file>
+# 
+# Finds entries in a bibliography file that are the most similar to incorrectly cited entries from a LaTeX log file.
+
+use strict;
+use warnings;
+use Text::Levenshtein qw(fastdistance);
+use Text::BibTeX qw(split_list);
+use Text::BibTeX qw(:macrosubs);
+use Getopt::Long;
+use IPC::Open2;
+use vars qw(@entries $nsuggs);
+
+sub go {
+	# Process the command line options.  After GetOptions sucks out any
+	# flags, there should be exactly two options left: the input and
+	# output file names.
+	$nsuggs = 10;
+	if(!GetOptions(
+		'suggestions=i' => \$nsuggs
+	)) {
+		exit(1);
+	}
+
+	if(scalar(@ARGV) != 2) {
+		print STDERR "Usage:  bibkeytypo <entry key > <bib file>\n";
+		exit(1);
+	}
+
+	# Open the input file.
+	delete_all_macros();
+	my $infile;
+	if(!($infile = new Text::BibTeX::File $ARGV[1])) { 
+		print STDERR "Could not open BibTeX input file $ARGV[1]\n";
+		exit(1);
+	}
+	$infile->set_structure('Bib');
+
+	# Read in the entire input file, because Text::BibTeX doesn't like to
+	# make two passes over the same file.
+	while(my $entry = new Text::BibTeX::Entry $infile) {
+		push @entries, $entry;
+	}
+
+	# Open the log file.  Look for citation errors.
+	if(!open(LOG, "<$ARGV[0]")) {
+		print STDERR "Could not open LaTeX log file $ARGV[0]\n";
+		exit(1);
+	}
+
+	while(my $line = <LOG>) {
+		if($line =~ /LaTeX Warning: Citation `(.*)' on page .* undefined on input line (\d*)\./) {
+			my $wrongKey = $1;
+			my $location = $2;
+			print "Incorrect key: $wrongKey\n";
+			print "Line: $location\n";
+			print "Suggested fixes:\n";
+			suggestFixes($wrongKey);
+		}
+	}
+
+}
+
+sub suggestFixes {
+	# Remember the given key.
+	my $key = shift;
+
+	# Start a series of filters to clean up the output.
+	open2(*FiltersIn, *FiltersOut, "sort -n | head -n $nsuggs");
+
+	# Compute the minimum edit distance between the given key and each key in
+	# the bib file.
+	foreach my $entry (@entries) {
+		my $key2 = $entry->key;
+		next if(!defined $key2);
+		my $dist = fastdistance(lc $key, lc $key2);	
+		print FiltersOut sprintf(" %2d %s\n", $dist, $key2);
+	}
+
+	# Get the results back from the filter chain and send them to standard
+	# output.
+	close FiltersOut;
+	print while(<FiltersIn>);
+	close FiltersIn;
+}
+			
+
+go;
+
+
